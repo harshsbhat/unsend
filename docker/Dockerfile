@@ -17,12 +17,13 @@ WORKDIR /app
 # RUN yarn global add turbo@^2
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
 COPY ./apps/web ./apps/web
+COPY ./apps/smtp-server ./apps/smtp-server
 COPY ./packages ./packages
 RUN pnpm add turbo@^1.12.5 -g
 
 # Generate a partial monorepo with a pruned lockfile for a target workspace.
 # Assuming "web" is the name entered in the project's package.json: { name: "web" }
-RUN pnpm turbo prune web --docker
+RUN pnpm turbo prune web smtp-server --docker
 
 # Add lockfile and package.json's of isolated subworkspace
 FROM base AS installer
@@ -38,10 +39,10 @@ COPY --from=builder /app/out/pnpm-lock.yaml ./pnpm-lock.yaml
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 
 
-# Build the project
+# Build the projects
 COPY --from=builder /app/out/full/ .
 
-RUN pnpm turbo run build --filter=web...
+RUN pnpm turbo run build --filter=web... --filter=smtp-server...
 
 FROM base AS runner
 WORKDIR /app
@@ -69,9 +70,13 @@ COPY --from=installer  /app/apps/web/node_modules/@prisma ./node_modules/@prisma
 RUN mkdir node_modules/.bin
 RUN ln -s /app/node_modules/prisma/build/index.js ./node_modules/.bin/prisma
 
+# Copy necessary files for the smtp-server application
+COPY --from=installer /app/apps/smtp-server/src/server.ts ./apps/smtp-server/src/server.ts
+COPY --from=installer /app/apps/smtp-server/package.json ./apps/smtp-server/package.json
+
 # set this so it throws error where starting server
 ENV SKIP_ENV_VALIDATION="false"
 
-COPY  ./docker/start.sh ./start.sh
+COPY ./docker/start.sh ./start.sh
 
 CMD ["sh", "start.sh"]
